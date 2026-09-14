@@ -1,14 +1,17 @@
 import type { Request, Response } from 'express';
 import { AiAssistantService } from '../services/aiAssistantService';
+import { AiBackendClient } from '../services/aiBackendClient';
+import { RecommendationService } from '../services/recommendationService';
 
 export class AiAssistantController {
   /**
    * POST /api/assistant/chat
-   * Interprets natural language prompt and grounds results against the real database
+   * 1) Prefer AI Backend structured understanding
+   * 2) Run recommendation pipeline when intent is find_team
+   * 3) Fall back to existing AiAssistantService so current UI keeps working
    */
   public static async chat(req: Request, res: Response): Promise<void> {
     try {
-      // Defensive payload ingestion with fallback defaults
       const body = req.body && typeof req.body === 'object' ? req.body : {};
       const { prompt, userId, currentUserProfile } = body;
 
@@ -20,14 +23,77 @@ export class AiAssistantController {
         return;
       }
 
-      // Input length guard
       const sanitizedPrompt = prompt.trim().slice(0, 2000);
 
+      // --- New path: AI Backend understand + recommendation pipeline ---
+      let structured: any = null;
+      let structuredSource: string | null = null;
+      try {
+        const understood = await AiBackendClient.understandChat(sanitizedPrompt, {
+          userId,
+          currentUserProfile,
+        });
+        if (understood.ok && understood.data) {
+          structured = understood.data;
+          structuredSource = understood.source || 'ai-backend';
+        }
+      } catch {
+        // ignore — fallback below
+      }
+
+      if (structured && structured.intent === 'find_team' && Array.isArray(structured.requiredRoles)) {
+        const search = await RecommendationService.search({
+          location: structured.location ?? null,
+          projectType: structured.projectType ?? null,
+          genres: structured.genres || [],
+          requiredRoles: structured.requiredRoles || [],
+          availability: structured.availability ?? null,
+          limit: 12,
+          excludeUserIds: userId ? [userId] : [],
+        });
+
+        // Shape compatible with existing assistant UI where possible
+        res.json({
+          success: true,
+          intent: structured.intent,
+          structuredRequirements: structured,
+          understandingSource: structuredSource,
+          message:
+            search.candidates.length > 0
+              ? `Found ${search.candidates.length} strong matches for your request.`
+              : 'No strong matches after filters. Try broadening location or roles.',
+          matchedItems: search.candidates.map((c) => ({
+            id: c.userId,
+            type: 'creator',
+            score: c.score,
+            matchReasons: c.matchReasons,
+            title: c.profile.name,
+            subtitle: c.profile.primaryRole,
+            meta: {
+              location: (c.profile as any).location || (c.profile as any).city,
+              professions: (c.profile as any).professions,
+            },
+          })),
+          candidates: search.candidates,
+          pipeline: search.pipeline,
+          totalFiltered: search.totalFiltered,
+        });
+        return;
+      }
+
+      // --- Legacy path (keeps existing Gemini assistant behaviour) ---
       const result = await AiAssistantService.processQuery({
         prompt: sanitizedPrompt,
         userId: typeof userId === 'string' ? userId : undefined,
-        currentUserProfile: currentUserProfile && typeof currentUserProfile === 'object' ? currentUserProfile : null,
+        currentUserProfile:
+          currentUserProfile && typeof currentUserProfile === 'object' ? currentUserProfile : null,
       });
+
+      // Attach structured understanding when available
+      if (structured) {
+        (result as any).structuredRequirements = structured;
+        (result as any).understandingSource = structuredSource;
+      }
 
       res.json(result);
     } catch (err: any) {

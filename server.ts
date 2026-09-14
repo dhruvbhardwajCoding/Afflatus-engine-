@@ -5,6 +5,10 @@ import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import { exploreRoutes } from './server/routes/exploreRoutes';
 import { assistantRoutes } from './server/routes/aiAssistantRoutes';
+import { profileRoutes } from './server/routes/profileRoutes';
+import { recommendationRoutes } from './server/routes/recommendationRoutes';
+import { projectRoutes } from './server/routes/projectRoutes';
+import { chatRoutes } from './server/routes/chatRoutes';
 import { AiAssistantService } from './server/services/aiAssistantService';
 import { getDatabase, saveDatabase } from './server/db';
 import type { DBUser } from './server/types';
@@ -16,11 +20,38 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
+// CORS for separate frontend origin
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.header(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, x-user-id, x-userid, x-internal-secret'
+  );
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 // Mount Explore Modular Routes (Core Discovery Engine)
 app.use('/api/explore', exploreRoutes);
 
 // Mount C1 Personal AI Assistant Routes
 app.use('/api/assistant', assistantRoutes);
+
+// Profile / users / skills / interests / availability (spec §25)
+app.use('/api', profileRoutes);
+
+// Recommendation pipeline (spec §28)
+app.use('/api/recommendations', recommendationRoutes);
+
+// Projects, invitations, notifications, experience, collaborations (Batch B)
+app.use('/api', projectRoutes);
+
+// Chat conversations + team recommendations + brief parse v2 (Batch C)
+app.use('/api', chatRoutes);
 
 // Lazy initialize Gemini API client with required User-Agent
 let aiClient: GoogleGenAI | null = null;
@@ -1309,11 +1340,15 @@ app.post('/api/briefs/parse', async (req, res) => {
 async function startServer() {
   // Phase 1 architecture split: Main Backend is API-only.
   // Frontend (Vite) runs as a separate process and talks to this service.
-  app.get('/health', (_req, res) => {
+  app.get('/health', async (_req, res) => {
+    const { isFirestoreEnabled } = await import('./server/services/dataStore');
+    const { isFirebaseAdminReady } = await import('./server/services/firebaseAdmin');
     res.json({
       status: 'ok',
       service: 'affil-main-backend',
       aiBackendUrl: process.env.AI_BACKEND_URL || 'http://localhost:3001',
+      dataMode: isFirestoreEnabled() ? 'firestore' : 'memory',
+      firebaseAdmin: isFirebaseAdminReady(),
     });
   });
 
