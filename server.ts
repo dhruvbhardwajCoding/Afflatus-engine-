@@ -3,6 +3,10 @@ import path from 'path';
 import fs from 'fs';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
+
+// VERY IMPORTANT: Load config BEFORE any local imports that depend on process.env (like firebaseAdmin)
+dotenv.config();
+
 import { exploreRoutes } from './server/routes/exploreRoutes';
 import { assistantRoutes } from './server/routes/aiAssistantRoutes';
 import { profileRoutes } from './server/routes/profileRoutes';
@@ -13,8 +17,6 @@ import { postRoutes } from './server/routes/postRoutes';
 
 import { getDatabase, saveDatabase } from './server/db';
 import type { DBUser } from './server/types';
-
-dotenv.config();
 
 const app = express();
 const PORT = 3000;

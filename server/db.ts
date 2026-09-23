@@ -4,42 +4,13 @@ import type { DatabaseSchema, DBUser, Project, ProjectTask, CreativeClub, WorkSh
 import type { CreatorProfile } from '../shared/types/index';
 import { SEED_PROJECTS, SEED_TASKS, SEED_CLUBS, SEED_WORKS } from './seeds';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = path.join(DATA_DIR, 'database.json');
-
 let inMemoryDb: DatabaseSchema | null = null;
 
 export function getDatabase(): DatabaseSchema {
   if (inMemoryDb) {
     return inMemoryDb;
   }
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      const raw = fs.readFileSync(DB_FILE, 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.users)) {
-        inMemoryDb = {
-          users: parsed.users,
-          connections: Array.isArray(parsed.connections) ? parsed.connections : [],
-          projects: Array.isArray(parsed.projects) && parsed.projects.length > 0 ? parsed.projects : [...SEED_PROJECTS],
-          tasks: Array.isArray(parsed.tasks) && parsed.tasks.length > 0 ? parsed.tasks : [...SEED_TASKS],
-          clubs: Array.isArray(parsed.clubs) && parsed.clubs.length > 0 ? parsed.clubs : [...SEED_CLUBS],
-          workShowcases: Array.isArray(parsed.workShowcases) && parsed.workShowcases.length > 0 ? parsed.workShowcases : [...SEED_WORKS],
-          matches: Array.isArray(parsed.matches) ? parsed.matches : [],
-          workspaces: parsed.workspaces || {},
-          posts: Array.isArray(parsed.posts) ? parsed.posts : [],
-        };
-        // If projects, tasks, or clubs were missing from file, persist updated schema
-        if (!parsed.projects || parsed.projects.length === 0 || !parsed.tasks || !parsed.clubs || !parsed.workShowcases) {
-          saveDatabase(inMemoryDb);
-        }
-        return inMemoryDb;
-      }
-    }
-  } catch (err) {
-    console.warn('[DB] Error loading database, using default seeded state:', err);
-  }
-
+  
   inMemoryDb = {
     users: [],
     connections: [],
@@ -57,14 +28,10 @@ export function getDatabase(): DatabaseSchema {
 export function saveDatabase(db?: DatabaseSchema): void {
   const target = db || inMemoryDb;
   if (!target) return;
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    fs.writeFileSync(DB_FILE, JSON.stringify(target, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('[DB] Failed to save database to disk:', err);
-  }
+  inMemoryDb = target;
+  // NOTE: Local file persistence (data/database.json) has been removed.
+  // All new data storage (Posts, Connections, Feedback) must use Firebase Firestore.
+  // This in-memory DB is purely for seeding legacy demo content (projects, clubs).
 }
 
 export function getAllUsers(): DBUser[] {
