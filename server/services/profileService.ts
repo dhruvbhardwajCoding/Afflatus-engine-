@@ -6,7 +6,6 @@ import { getDatabase, saveDatabase, getUserById } from '../db';
 import { saveUser, getUser, isFirestoreEnabled } from './dataStore';
 import type { DBUser } from '../types';
 import { normalizeProfession, type ProfessionId } from '../constants/professions';
-import { AiBackendClient } from './aiBackendClient';
 
 export interface AvailabilityModel {
   status: 'available' | 'busy' | 'available_from' | 'available_until';
@@ -178,31 +177,4 @@ export class ProfileService {
     return this.updateMe(userId, { availability });
   }
 
-  static async refreshEmbedding(userId: string) {
-    const user = getUserById(userId);
-    if (!user) return null;
-    const profile = toPublicProfile(user);
-    const text = [
-      profile.name,
-      profile.bio,
-      ...(profile.professions || []),
-      JSON.stringify(profile.skills || {}),
-      JSON.stringify(profile.interests || {}),
-      JSON.stringify(profile.experience || {}),
-      profile.location || profile.city || '',
-    ].join(' | ');
-
-    const emb = await AiBackendClient.embedProfile(text);
-    if (emb.ok && emb.embedding) {
-      const db = getDatabase();
-      const idx = db.users.findIndex((u) => u.id === userId);
-      if (idx >= 0) {
-        (db.users[idx] as any).profileEmbedding = emb.embedding;
-        (db.users[idx] as any).updatedAt = new Date().toISOString();
-        saveDatabase(db);
-      }
-      return { embedding: emb.embedding, source: emb.source };
-    }
-    return { embedding: null, error: (emb as any).error };
-  }
 }

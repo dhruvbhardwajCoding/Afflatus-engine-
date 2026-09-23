@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { ProfileService } from '../services/profileService';
+import { RecommendationService } from '../services/recommendationService';
+import { CollaborationAnalysisService } from '../services/collaborationAnalysisService';
 import { PROFESSIONS, GENRES } from '../constants/professions';
 import { getOnboardingForProfessions, PROFESSION_ONBOARDING } from '../constants/onboarding';
 import { seedDemoCreators, isFirestoreEnabled } from '../services/dataStore';
@@ -64,6 +66,23 @@ profileRoutes.post('/admin/seed-demo-creators', async (_req, res) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Seed failed' });
   }
+});
+
+profileRoutes.post('/profiles/analyze-collaboration', async (req, res) => {
+  const userId = resolveUserId(req);
+  if (!userId) return res.status(401).json({ error: 'x-user-id required' });
+
+  const { answers } = req.body;
+  if (!answers || typeof answers !== 'object') {
+    return res.status(400).json({ error: 'answers object required' });
+  }
+
+  const result = await CollaborationAnalysisService.analyzeAnswers(answers);
+  if (!result.success) {
+    return res.status(502).json({ error: result.error });
+  }
+
+  res.json({ collaborationProfile: result.data });
 });
 
 profileRoutes.get('/admin/data-mode', (_req, res) => {

@@ -84,6 +84,22 @@ export interface CreatorProfile {
   // Collaborator Exchange & Verification Requirements
   unionStatus?: 'Union (IATSE / DGA / Local 600)' | 'Non-Union' | 'Both / Fi-Core';
   yearsExperience?: number;
+  experience?: {
+    yearsActive?: number;
+    projectsCompleted?: number;
+    roleSpecificProjects?: number;
+  };
+  collaborationProfile?: {
+    creativity: number;
+    communication: number;
+    flexibility: number;
+    reliability: number;
+    teamwork: number;
+    feedback_openness: number;
+    leadership: number;
+    technical_proficiency: number;
+    confidenceScores?: Record<string, number>;
+  };
   specialtyTags?: string[];
   cameraBodyVerified?: string;
   lensMount?: string;

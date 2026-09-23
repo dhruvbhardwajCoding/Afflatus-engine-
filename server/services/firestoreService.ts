@@ -5,14 +5,14 @@
  */
 import { isFirebaseAdminReady } from './firebaseAdmin';
 
+import admin from 'firebase-admin';
+
 let db: any = null;
 
 function getDb() {
   if (db) return db;
   if (!isFirebaseAdminReady()) return null;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const admin = require('firebase-admin');
     db = admin.firestore();
     return db;
   } catch {

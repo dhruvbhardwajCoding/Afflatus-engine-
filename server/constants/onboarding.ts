@@ -9,7 +9,7 @@ export const PROFESSION_ONBOARDING: Record<
     projectTypes: string[];
     genres?: string[];
     skills?: string[];
-    extraQuestions?: Array<{ id: string; label: string; type: 'multi' | 'single' | 'text' }>;
+    extraQuestions?: Array<{ id: string; label: string; type: 'multi' | 'single' | 'text' | 'scale' }>;
   }
 > = {
   director: {
@@ -127,8 +127,28 @@ export const PROFESSION_ONBOARDING: Record<
 };
 
 export function getOnboardingForProfessions(professionIds: string[]) {
-  return professionIds.map((id) => ({
-    professionId: id,
-    ...(PROFESSION_ONBOARDING[id] || PROFESSION_ONBOARDING.other),
-  }));
+  const universalQuestions: Array<{ id: string; label: string; type: 'multi' | 'single' | 'text' | 'scale' | 'number', options?: string[] }> = [
+    { id: 'yearsActive', label: 'How many years have you been active in this role?', type: 'number' },
+    { id: 'projectsCompleted', label: 'Roughly how many projects have you completed?', type: 'number' },
+    { id: 'roleSpecificProjects', label: 'How many of those were specifically in this primary role?', type: 'number' },
+    { id: 'scenario_q1', label: 'You strongly disagree with the creative direction chosen by someone leading your project. What would you do?', type: 'text' },
+    { id: 'scenario_q2', label: 'Someone gives you critical feedback about your work. How do you usually respond?', type: 'text' },
+    { id: 'scenario_q3', label: 'Your team is behind schedule and your task is taking longer than expected. What would you do?', type: 'text' },
+    { id: 'scenario_q4', label: 'Which collaboration style describes you best?', type: 'single', options: [
+      'Prefer clear direction and execute it',
+      'Discuss ideas and shape the direction together',
+      'Prefer taking ownership and proposing my own direction',
+      'Depends on the project'
+    ]},
+    { id: 'scenario_q5', label: 'What qualities do you value most in someone you collaborate with?', type: 'text' }
+  ];
+
+  return professionIds.map((id) => {
+    const prof = PROFESSION_ONBOARDING[id] || PROFESSION_ONBOARDING.other;
+    return {
+      professionId: id,
+      ...prof,
+      extraQuestions: [...(prof.extraQuestions || []), ...universalQuestions]
+    };
+  });
 }

@@ -36,6 +36,18 @@ export type DBUser = CreatorProfile & {
   passwordHash?: string;
 };
 
+export interface RecommendationEvent {
+  id: string;
+  userId?: string;
+  candidateId?: string;
+  projectId?: string;
+  rank: number;
+  score: number;
+  timestamp: string;
+  recommendationType: 'creator' | 'project';
+  eventType: 'impression' | 'click' | 'application';
+}
+
 export interface DatabaseSchema {
   users: DBUser[];
   connections: Array<{
@@ -54,4 +66,6 @@ export interface DatabaseSchema {
   workShowcases: WorkShowcase[];
   matches: any[];
   workspaces: Record<string, any>;
+  recommendationEvents: RecommendationEvent[];
+  posts?: any[];
 }

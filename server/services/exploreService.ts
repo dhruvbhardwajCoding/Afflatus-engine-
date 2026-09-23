@@ -39,39 +39,48 @@ export class ExploreService {
     let score = 20;
     const reasons: string[] = [];
 
-    const userSeeking = (currentUser.seekingRoles || []).map((r) => r.toLowerCase());
-    const candidatePrimary = candidate.primaryRole.toLowerCase();
-    const candidateSecondary = (candidate.secondaryRoles || []).map((r) => r.toLowerCase());
+    // 1. Soft Compatibility Scoring based on collaborationProfile
+    const userProfile = (currentUser as any).collaborationProfile;
+    const candidateProfile = (candidate as any).collaborationProfile;
 
-    // 1. Role Match (User seeks candidate's craft)
-    if (userSeeking.some((r) => candidatePrimary.includes(r) || r.includes(candidatePrimary))) {
-      score += 40;
-      reasons.push(`Direct role match for your seeking preference: ${candidate.primaryRole}`);
-    } else if (userSeeking.some((r) => candidateSecondary.some((cs) => cs.includes(r) || r.includes(cs)))) {
-      score += 25;
-      reasons.push(`Skills match your collaborator needs`);
+    if (userProfile && candidateProfile) {
+      // Complementary matches
+      if (userProfile.leadership >= 8 && candidateProfile.flexibility >= 7) {
+        score += 15;
+        reasons.push('Highly compatible workflow (Leadership + Flexibility)');
+      } else if (userProfile.creativity >= 8 && candidateProfile.technical_proficiency >= 8) {
+        score += 15;
+        reasons.push('Great creative/technical synergy');
+      }
+      
+      // General good traits
+      if (candidateProfile.communication >= 8) {
+        score += 10;
+        reasons.push('Excellent communicator');
+      }
+      if (candidateProfile.reliability >= 8) {
+        score += 10;
+        reasons.push('Highly reliable');
+      }
+
+      // Add a small randomized variation to keep the feed fresh for discovery
+      score += Math.floor(Math.random() * 10);
+    } else {
+      score += 10; // Base score for incomplete profiles
     }
 
-    // 2. Mutual Seeking (Candidate also seeks user's role)
-    const candidateSeeking = (candidate.seekingRoles || []).map((r) => r.toLowerCase());
-    const userPrimary = (currentUser.primaryRole || '').toLowerCase();
-    if (userPrimary && candidateSeeking.some((r) => userPrimary.includes(r) || r.includes(userPrimary))) {
-      score += 20;
-      reasons.push(`Actively seeking a ${currentUser.primaryRole}`);
-    }
-
-    // 3. Location Proximity
+    // 2. Location Proximity
     if (currentUser.location && candidate.location && currentUser.location.toLowerCase() === candidate.location.toLowerCase()) {
       score += 15;
-      reasons.push(`Based in ${candidate.location}`);
+      reasons.push(`Based near you in ${candidate.location}`);
     }
 
-    // 4. Equipment/Portfolio richness
+    // 3. Equipment/Portfolio richness
     if (candidate.gearItems && candidate.gearItems.length > 0) {
       score += 10;
     }
 
-    const mainReason = reasons.length > 0 ? reasons.join(' • ') : `Active ${candidate.primaryRole} available for collaborative work`;
+    const mainReason = reasons.length > 0 ? reasons.join(' • ') : `Creative professional in ${candidate.primaryRole}`;
     return { score, reason: mainReason };
   }
 

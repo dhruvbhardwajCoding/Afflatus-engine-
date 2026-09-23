@@ -1,10 +1,6 @@
-/**
- * Chat conversations + messages (spec §29).
- * Flow: save user message → AI understand → optional recommendation → save AI message.
- */
 import { getDatabase, saveDatabase } from '../db';
-import { AiBackendClient } from './aiBackendClient';
 import { RecommendationService } from './recommendationService';
+import { QueryUnderstandingService } from './queryUnderstandingService';
 
 export interface ChatMessage {
   id: string;
@@ -90,41 +86,29 @@ export class ChatService {
     db.messages.push(userMsg);
 
     // AI understand
-    const understood = await AiBackendClient.understandChat(content, { userId, conversationId });
-    let structured = understood.ok ? understood.data : null;
+    const understood = await QueryUnderstandingService.understandChat(content);
+    let structured = understood.success ? understood.data : null;
     let candidates: any[] = [];
     let assistantText = 'I understood your request.';
 
-    if (structured?.intent === 'find_team' && Array.isArray(structured.requiredRoles)) {
-      const search = await RecommendationService.search({
-        location: structured.location ?? null,
-        projectType: structured.projectType ?? null,
-        genres: structured.genres || [],
-        requiredRoles: structured.requiredRoles || [],
-        availability: structured.availability ?? null,
-        limit: 10,
-        excludeUserIds: [userId],
-        requesterId: userId,
-      });
-      candidates = search.candidates.map((c) => ({
-        userId: c.userId,
-        score: Math.round(c.score * 100) / 100,
-        matchReasons: c.matchReasons,
+    if (structured && (structured.role !== 'not_specified' || structured.location?.city !== 'not_specified')) {
+      const search = await RecommendationService.searchFromRequirements(structured, userId);
+      candidates = search.results.map((c) => ({
+        userId: c.creatorId,
+        score: c.score,
+        matchReasons: c.reasons,
         name: c.profile.name,
         primaryRole: c.profile.primaryRole,
-        location: (c.profile as any).location || (c.profile as any).city,
+        location: c.profile.location,
       }));
       assistantText =
         candidates.length > 0
-          ? `Found ${candidates.length} candidates for ${structured.requiredRoles.join(', ')}${
-              structured.location ? ` in ${structured.location}` : ''
-            }.`
+          ? `Found ${candidates.length} candidates.`
           : 'No strong matches after filters. Try a broader location or different roles.';
     } else if (structured) {
-      assistantText = `Got it (intent: ${structured.intent || 'general'}). Tell me the roles, city, and project type if you want team recommendations.`;
+      assistantText = `Got it. Tell me the roles, city, and project type if you want team recommendations.`;
     } else {
-      assistantText =
-        'AI Backend is offline — I saved your message. Start ai-backend for structured understanding.';
+      assistantText = 'I failed to understand that query.';
     }
 
     const aiMsg: ChatMessage = {

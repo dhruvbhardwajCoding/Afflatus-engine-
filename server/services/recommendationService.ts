@@ -1,264 +1,180 @@
-/**
- * Recommendation pipeline (spec §19–21, §24, §28).
- * Stage 1 Hard filter → Stage 2 semantic (stub) → Stage 3 weighted rank via AI Backend.
- */
-import { normalizeProfession } from '../constants/professions';
-import { toPublicProfile } from './profileService';
-import { AiBackendClient } from './aiBackendClient';
-import { CollaborationService } from './collaborationService';
-import { listUsers, isFirestoreEnabled } from './dataStore';
-import { SemanticService } from './semanticService';
+import { listUsers } from './dataStore';
 import type { DBUser } from '../types';
 
-export interface RecommendationSearchRequest {
-  location?: string | null;
-  projectType?: string | null;
-  genres?: string[];
-  requiredRoles?: string[];
-  availability?: { start?: string; end?: string } | null;
-  limit?: number;
-  excludeUserIds?: string[];
-  /** Optional: boost candidates who worked well with this user */
-  requesterId?: string | null;
-}
+/**
+ * Trait keywords used to infer collaboration traits from a user's bio text
+ * when they don't have a formal collaborationProfile score.
+ */
+const TRAIT_KEYWORDS: Record<string, string[]> = {
+  creativity: ['creative', 'innovat', 'imagin', 'vision', 'artistic', 'original'],
+  communication: ['communicat', 'listen', 'speak', 'articulat', 'discuss', 'proactiv'],
+  reliability: ['reliab', 'dependab', 'consist', 'deadline', 'punctual', 'deliver'],
+  flexibility: ['flexib', 'adapt', 'versatil', 'open-mind', 'agile'],
+  teamwork: ['team', 'collaborat', 'together', 'cooperat', 'collective', 'partner'],
+  feedback_openness: ['feedback', 'growth mindset', 'criticism', 'learn', 'open to'],
+  leadership: ['lead', 'manag', 'direct', 'guid', 'mentor', 'captain'],
+  technical_proficiency: ['technic', 'expert', 'proficien', 'skill', 'master', 'speciali'],
+};
 
-export interface RankedCandidate {
-  userId: string;
-  score: number;
-  matchReasons: string[];
-  profile: ReturnType<typeof toPublicProfile>;
-}
-
-function cityMatch(userLoc: string | undefined, target: string | undefined | null): boolean {
-  if (!target) return true;
-  if (!userLoc) return false;
-  const a = userLoc.toLowerCase();
-  const b = target.toLowerCase();
-  return a.includes(b) || b.includes(a.split(',')[0].trim());
-}
-
-function roleMatch(user: DBUser, required: string[]): boolean {
-  if (!required.length) return true;
-  const profile = toPublicProfile(user);
-  const userRoles = new Set(
-    [
-      ...(profile.professions || []),
-      profile.primaryRole,
-      ...(profile.secondaryRoles || []),
-    ]
-      .filter(Boolean)
-      .map((r) => normalizeProfession(String(r)))
-  );
-  return required.some((r) => userRoles.has(normalizeProfession(r)));
-}
-
-function availabilityOk(user: DBUser, reqAvail?: { start?: string; end?: string } | null): boolean {
-  const avail = (user as any).availability;
-  if (!avail) return true; // unknown → allow
-  if (avail.status === 'busy') return false;
-  // date-window checks can be refined later
-  if (reqAvail?.start && avail.availableFrom) {
-    // simple string compare ISO dates
-    if (avail.availableFrom > reqAvail.start && reqAvail.end && avail.availableFrom > reqAvail.end) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function localScore(user: DBUser, req: RecommendationSearchRequest): {
-  scores: Record<string, number>;
-  reasons: string[];
-} {
-  const profile = toPublicProfile(user);
-  const reasons: string[] = [];
-  const scores: Record<string, number> = {
-    semanticMatch: 0.5,
-    skillMatch: 0.5,
-    relevantExperience: 0.5,
-    interestMatch: 0.5,
-    availability: 0.7,
-    location: 0.5,
-    reliability: profile.reputationScore ?? 0.7,
-    collaboration: 0.5,
-  };
-
-  // Collaboration graph boost
-  if (req.requesterId) {
-    const cScore = CollaborationService.getScore(req.requesterId, user.id);
-    scores.collaboration = cScore;
-    if (cScore > 0.6) {
-      reasons.push('Previously collaborated successfully in your network');
-    }
+/**
+ * Estimate a trait score (0-10) for a user by checking their collaborationProfile
+ * first, then falling back to keyword scanning in their bio.
+ */
+function estimateTraitScore(user: any, trait: string): number {
+  // 1. Use collaborationProfile if available
+  const cp = user.collaborationProfile;
+  if (cp && typeof cp[trait] === 'number') {
+    return cp[trait];
   }
 
-  // Location
-  const loc = profile.location || profile.city || '';
-  if (req.location && cityMatch(loc, req.location)) {
-    scores.location = 1;
-    reasons.push(`Located in ${loc || req.location}`);
-  } else if (!req.location) {
-    scores.location = 0.7;
-  } else {
-    scores.location = 0.15;
-  }
+  // 2. Fallback: scan bio for trait keywords
+  const bio = (user.bio || '').toLowerCase();
+  if (!bio) return 5; // neutral default
 
-  // Role / skill
-  if (req.requiredRoles?.length) {
-    const matched = req.requiredRoles.filter((r) =>
-      roleMatch(user, [r])
-    );
-    scores.skillMatch = matched.length / req.requiredRoles.length;
-    if (matched.length) {
-      reasons.push(`Role match: ${matched.map((r) => normalizeProfession(r)).join(', ')}`);
-    }
-  }
+  const keywords = TRAIT_KEYWORDS[trait] || [trait];
+  const matchCount = keywords.filter(kw => bio.includes(kw)).length;
 
-  // Genres → interests + experience
-  if (req.genres?.length) {
-    let interestSum = 0;
-    let expSum = 0;
-    for (const g of req.genres) {
-      const key = g.toLowerCase();
-      interestSum += Number(profile.interests?.[key] ?? 0.3);
-      expSum += Number(profile.experience?.[key] ?? profile.experience?.overall ?? 0.4);
-    }
-    scores.interestMatch = Math.min(1, interestSum / req.genres.length);
-    scores.relevantExperience = Math.min(1, expSum / req.genres.length);
-    if (scores.relevantExperience > 0.5) {
-      reasons.push(`Relevant experience in ${req.genres.join('/')}`);
-    }
-    if (scores.interestMatch > 0.6) {
-      reasons.push(`Strong interest in ${req.genres.join('/')}`);
-    }
-  }
-
-  // Availability
-  const avail = profile.availability;
-  if (avail?.status === 'available') {
-    scores.availability = 1;
-    reasons.push('Currently available');
-  } else if (avail?.status === 'busy') {
-    scores.availability = 0.1;
-  }
-
-  if (!reasons.length) reasons.push('Matches project requirements');
-
-  // crude semantic proxy from bio + roles
-  const blob = `${profile.bio || ''} ${(profile.professions || []).join(' ')}`.toLowerCase();
-  if (req.genres?.some((g) => blob.includes(g.toLowerCase()))) {
-    scores.semanticMatch = 0.85;
-  }
-
-  return { scores, reasons };
+  if (matchCount >= 2) return 9;
+  if (matchCount === 1) return 7;
+  return 5; // no evidence → neutral
 }
 
 export class RecommendationService {
-  static async search(req: RecommendationSearchRequest): Promise<{
-    candidates: RankedCandidate[];
-    totalFiltered: number;
-    pipeline: string[];
-  }> {
+  /**
+   * Two-stage pipeline:
+   *   Stage 1 – Hard filters: Role (required) + Location (if specified).
+   *   Stage 2 – Soft scoring: rank remaining candidates by preference traits.
+   *
+   * Always returns up to 10 results if any role-matched users exist,
+   * even when none score high on the requested traits.
+   */
+  static async searchFromRequirements(requirements: any, requesterId?: string | null) {
     const allUsers = (await listUsers(500)) as DBUser[];
-    const exclude = new Set(req.excludeUserIds || []);
-    const roles = (req.requiredRoles || []).map((r) => normalizeProfession(r));
 
-    // Stage 1 — Hard filters
-    let pool = allUsers.filter((u) => {
-      if (!u?.id || exclude.has(u.id)) return false;
-      if (req.location && !cityMatch((u as any).location || (u as any).city, req.location)) {
-        return false;
-      }
-      if (roles.length && !roleMatch(u, roles)) return false;
-      if (!availabilityOk(u, req.availability)) return false;
-      return true;
-    });
+    // ──────────────────────────────────────────────────────────
+    // Stage 1: Hard filters (Role + Location)
+    // ──────────────────────────────────────────────────────────
+    let pool = allUsers.filter(u => u.id && u.id !== requesterId);
 
-    const totalFiltered = pool.length;
-    const pipeline = [
-      isFirestoreEnabled() ? 'data:firestore' : 'data:memory',
-      'hard_filter:location+profession+availability',
-      `pool_size:${totalFiltered}`,
-    ];
+    // Normalize a role string for fuzzy comparison: lowercase, strip parentheses, slashes, extra spaces
+    const normalizeRole = (r: string) => r.toLowerCase().replace(/[()\/\-&]/g, ' ').replace(/\s+/g, ' ').trim();
+    // Split a compound role like "Screenwriter / Scriptwriter" into individual keywords
+    const roleKeywords = (r: string) => normalizeRole(r).split(' ').filter(w => w.length > 2);
 
-    // Stage 2 — semantic + local scoring
-    const projectEmb = await SemanticService.projectEmbedding({
-      location: req.location,
-      projectType: req.projectType,
-      genres: req.genres,
-      requiredRoles: roles,
-    });
-    if (projectEmb) pipeline.push('semantic:embeddings');
-    else pipeline.push('semantic:text_fallback');
+    const wantedRole = (requirements.role || '').toLowerCase().trim();
+    const hasRoleFilter = wantedRole && wantedRole !== 'not_specified';
+    const wantedNorm = normalizeRole(wantedRole);
+    const wantedWords = roleKeywords(wantedRole);
 
-    const withScores = pool.map((u) => {
-      const { scores, reasons } = localScore(u, { ...req, requiredRoles: roles });
-      const sem = SemanticService.semanticScore(projectEmb, {
-        ...u,
-        _projectLocation: req.location,
-        _projectType: req.projectType,
-        _genres: req.genres,
-        _roles: roles,
+    if (hasRoleFilter) {
+      pool = pool.filter(user => {
+        const userRoleStrings = [
+          user.primaryRole || '',
+          ...(user.secondaryRoles || []),
+          ...((user as any).professions || []),
+        ].filter(Boolean);
+
+        return userRoleStrings.some(r => {
+          const norm = normalizeRole(r);
+          const words = roleKeywords(r);
+          // Check: normalized contains, or any keyword overlap
+          return norm.includes(wantedNorm) 
+            || wantedNorm.includes(norm)
+            || wantedWords.some(w => norm.includes(w))
+            || words.some(w => wantedNorm.includes(w));
+        });
       });
-      scores.semanticMatch = Math.max(scores.semanticMatch || 0, sem);
-      return {
-        userId: u.id,
-        scores,
-        matchReasons: reasons,
-        profile: toPublicProfile(u),
-        // pass through for AI ranker
-        location: (u as any).location || (u as any).city,
-        primaryRole: u.primaryRole,
-        professions: (toPublicProfile(u) as any).professions,
-        availability: (toPublicProfile(u) as any).availability,
-      };
-    });
-
-    // Stage 3 — AI Backend ranking (or local weighted sum fallback)
-    const rankResult = await AiBackendClient.rankCandidates(withScores);
-    let ranked: RankedCandidate[];
-
-    if (rankResult.ok && Array.isArray(rankResult.ranked) && rankResult.ranked.length) {
-      pipeline.push('ai_backend:rank');
-      ranked = rankResult.ranked.map((c: any) => ({
-        userId: c.userId,
-        score: Number(c.score) || 0,
-        matchReasons: c.matchReasons || withScores.find((w) => w.userId === c.userId)?.matchReasons || [],
-        profile: c.profile || withScores.find((w) => w.userId === c.userId)?.profile,
-      }));
-    } else {
-      pipeline.push('local_weighted_rank');
-      const weights = {
-        semanticMatch: 0.3,
-        skillMatch: 0.2,
-        relevantExperience: 0.15,
-        interestMatch: 0.1,
-        availability: 0.1,
-        location: 0.05,
-        reliability: 0.05,
-        collaboration: 0.05,
-      };
-      ranked = withScores
-        .map((c) => {
-          let total = 0;
-          for (const [k, w] of Object.entries(weights)) {
-            total += (Number((c.scores as any)[k]) || 0) * w;
-          }
-          return {
-            userId: c.userId,
-            score: Math.min(1, Math.max(0, total)),
-            matchReasons: c.matchReasons,
-            profile: c.profile,
-          };
-        })
-        .sort((a, b) => b.score - a.score);
     }
 
-    const limit = Math.min(req.limit || 20, 50);
+    const wantedCity = (requirements.location?.city || '').toLowerCase();
+    const hasLocationFilter = wantedCity && wantedCity !== 'not_specified';
+
+    if (hasLocationFilter) {
+      pool = pool.filter(user => {
+        const loc = ((user as any).location || (user as any).city || '').toLowerCase();
+        return loc.includes(wantedCity);
+      });
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Stage 2: Soft scoring on preferences (only additive, never penalise)
+    // ──────────────────────────────────────────────────────────
+    const prefs = requirements.preferences || {};
+    // Collect which traits the user actually cares about
+    const activePrefKeys = Object.entries<any>(prefs)
+      .filter(([, v]) => v.level && v.level !== 'not_specified')
+      .map(([k, v]) => ({ key: k, level: v.level, importance: v.importance }));
+
+    const scored = pool.map(user => {
+      let score = 0;
+      const reasons: string[] = [];
+
+      // Give a base point for matching the role
+      if (hasRoleFilter) {
+        reasons.push(user.primaryRole || wantedRole);
+      }
+
+      // Score each requested preference trait
+      for (const { key, level, importance } of activePrefKeys) {
+        const userVal = estimateTraitScore(user, key);
+
+        // Weight multiplier based on importance
+        const weight = importance === 'required' ? 1.0
+          : importance === 'preferred' ? 0.7
+          : 0.4;
+
+        // How well does the user match the requested level?
+        let traitScore = 0;
+        if (level === 'high') {
+          traitScore = userVal / 10; // 0-1 scale, higher is better
+        } else if (level === 'mid') {
+          // Best match around 5-7, penalise extremes slightly
+          traitScore = userVal >= 4 && userVal <= 8 ? 0.8 : 0.4;
+        } else if (level === 'low') {
+          traitScore = (10 - userVal) / 10; // inverted
+        }
+
+        const contribution = traitScore * weight;
+        score += contribution;
+
+        if (traitScore >= 0.7) {
+          const label = key.replace(/_/g, ' ');
+          reasons.push(`Strong ${label}`);
+        }
+      }
+
+      // If no preferences were specified, give everyone a baseline score of 1
+      if (activePrefKeys.length === 0) {
+        score = 1;
+      }
+
+      return { creatorId: user.id, score, reasons, user };
+    });
+
+    // Sort descending by score
+    scored.sort((a, b) => b.score - a.score);
+
+    // Return top min(total, 10) – ALWAYS return results if any exist after hard filters
+    const topN = Math.min(scored.length, 10);
+    const results = scored.slice(0, topN);
+
+    // Normalise scores to 0-1 for the UI
+    const maxScore = results.length > 0 ? Math.max(results[0].score, 1) : 1;
+
     return {
-      candidates: ranked.slice(0, limit),
-      totalFiltered,
-      pipeline,
+      results: results.map(c => ({
+        creatorId: c.creatorId,
+        score: Math.min(1.0, c.score / maxScore),
+        reasons: c.reasons.length > 0 ? c.reasons : ['Matches role criteria'],
+        profile: {
+          id: c.user.id,
+          name: c.user.name,
+          avatarUrl: c.user.avatarUrl,
+          primaryRole: c.user.primaryRole,
+          location: (c.user as any).location || (c.user as any).city,
+          bio: c.user.bio,
+        },
+      })),
     };
   }
 }

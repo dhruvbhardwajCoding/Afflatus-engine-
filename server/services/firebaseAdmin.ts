@@ -4,9 +4,11 @@
  * verifies ID tokens. Otherwise falls back to x-user-id (dev mode).
  */
 import type { Request } from 'express';
+import admin from 'firebase-admin';
 
 let adminApp: any = null;
 let adminAuth: any = null;
+let adminDb: any = null;
 let initAttempted = false;
 
 export function isFirebaseAdminReady(): boolean {
@@ -18,9 +20,6 @@ function ensureInit() {
   if (initAttempted) return;
   initAttempted = true;
   try {
-    // Dynamic require so the package is optional
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const admin = require('firebase-admin');
     if (admin.apps?.length) {
       adminApp = admin.app();
     } else {
@@ -40,10 +39,19 @@ function ensureInit() {
       }
     }
     adminAuth = admin.auth();
+    adminDb = admin.firestore();
     console.log('[FirebaseAdmin] Ready');
   } catch (err: any) {
     console.warn('[FirebaseAdmin] Init skipped:', err?.message || err);
   }
+}
+
+export function getAdminDb() {
+  ensureInit();
+  if (!adminDb) {
+    throw new Error('Firebase Admin DB is not initialized.');
+  }
+  return adminDb;
 }
 
 /** Verify Bearer token → uid, or null */

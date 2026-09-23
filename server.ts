@@ -9,7 +9,8 @@ import { profileRoutes } from './server/routes/profileRoutes';
 import { recommendationRoutes } from './server/routes/recommendationRoutes';
 import { projectRoutes } from './server/routes/projectRoutes';
 import { chatRoutes } from './server/routes/chatRoutes';
-import { AiAssistantService } from './server/services/aiAssistantService';
+import { postRoutes } from './server/routes/postRoutes';
+
 import { getDatabase, saveDatabase } from './server/db';
 import type { DBUser } from './server/types';
 
@@ -52,6 +53,9 @@ app.use('/api', projectRoutes);
 
 // Chat conversations + team recommendations + brief parse v2 (Batch C)
 app.use('/api', chatRoutes);
+
+// Post routes for creating and viewing posts
+app.use('/api', postRoutes);
 
 // Lazy initialize Gemini API client with required User-Agent
 let aiClient: GoogleGenAI | null = null;
@@ -724,66 +728,23 @@ app.post('/api/auth/verify-otp', (req, res) => {
     return res.status(400).json({ error: 'Invalid verification code. Please check and try again.' });
   }
 
-  // OTP verified! Create real user
+  // OTP verified! We just return success. The frontend will create the user in Firebase Auth and Firestore.
   const { userData } = record;
   let cleanUsername = userData.username.trim().toLowerCase().replace(/^@/, '');
   if (cleanUsername.length < 3) {
     cleanUsername = `${cleanUsername}_${Math.floor(100 + Math.random() * 900)}`;
   }
 
-  const existingUsername = database.users.find((u) => u.username.toLowerCase() === cleanUsername);
-  if (existingUsername) {
-    cleanUsername = `${cleanUsername}_${Math.floor(100 + Math.random() * 900)}`;
-  }
-
-  const newUser: DBUser = {
-    id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    username: cleanUsername,
-    email: cleanEmail,
-    passwordHash: userData.password || 'password123',
-    name: userData.name,
-    avatarUrl: '',
-    coverImageUrl: '',
-    bio: '',
-    primaryRole: userData.primaryRole || 'Cinematographer',
-    secondaryRoles: [],
-    seekingRoles: userData.seekingRoles || ['Director', 'Lead Video Editor', 'Location Sound Recordist'],
-    location: 'Mumbai, Maharashtra',
-    travelRadiusMiles: 150,
-    dayRateUsd: 25000,
-    hourlyRateUsd: 3200,
-    pastBudgetTiers: ['indie', 'commercial'],
-    communicationStyle: 'collaborative_brainstormer',
-    userRole: 'collaborator',
-    gearItems: [],
-    portfolios: [],
-    workLinks: [],
-    socialLinks: {},
-    profileCompleted: false,
-    createdAt: new Date().toISOString(),
-  };
-
-  database.users.unshift(newUser);
-  saveDatabaseToDisk();
   delete otpStore[cleanEmail]; // Clear OTP after success
 
-  const token = `token_${newUser.id}_${Date.now()}`;
-  return res.status(201).json({
+  return res.status(200).json({
     success: true,
-    message: 'Email successfully verified and account created!',
-    token,
-    user: {
-      id: newUser.id,
-      username: newUser.username,
-      email: newUser.email,
-      name: newUser.name,
-      avatarUrl: newUser.avatarUrl,
-      primaryRole: newUser.primaryRole,
-      seekingRoles: newUser.seekingRoles,
-      userRole: newUser.userRole,
-      profileCompleted: newUser.profileCompleted,
-    },
-    fullProfile: newUser,
+    message: 'Email successfully verified!',
+    fullProfile: {
+      username: cleanUsername,
+      primaryRole: userData.primaryRole,
+      seekingRoles: userData.seekingRoles
+    }
   });
 });
 

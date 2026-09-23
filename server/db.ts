@@ -27,6 +27,7 @@ export function getDatabase(): DatabaseSchema {
           workShowcases: Array.isArray(parsed.workShowcases) && parsed.workShowcases.length > 0 ? parsed.workShowcases : [...SEED_WORKS],
           matches: Array.isArray(parsed.matches) ? parsed.matches : [],
           workspaces: parsed.workspaces || {},
+          posts: Array.isArray(parsed.posts) ? parsed.posts : [],
         };
         // If projects, tasks, or clubs were missing from file, persist updated schema
         if (!parsed.projects || parsed.projects.length === 0 || !parsed.tasks || !parsed.clubs || !parsed.workShowcases) {
@@ -48,6 +49,7 @@ export function getDatabase(): DatabaseSchema {
     workShowcases: [...SEED_WORKS],
     matches: [],
     workspaces: {},
+    posts: [],
   };
   return inMemoryDb;
 }

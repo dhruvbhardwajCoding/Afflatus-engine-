@@ -13,8 +13,20 @@ import {
   fsQuery,
 } from './firestoreService';
 import { getDatabase, saveDatabase, getUserById as memGetUser } from '../db';
+import type { RecommendationEvent } from '../types';
 
 export { isFirestoreEnabled };
+
+export async function logRecommendationEvent(event: RecommendationEvent) {
+  if (isFirestoreEnabled()) {
+    return fsAdd('recommendationEvents', event);
+  }
+  const db = getDatabase() as any;
+  if (!db.recommendationEvents) db.recommendationEvents = [];
+  db.recommendationEvents.push(event);
+  saveDatabase(db);
+  return event;
+}
 
 export async function getUser(id: string) {
   if (isFirestoreEnabled()) {
@@ -140,10 +152,20 @@ export async function seedDemoCreators() {
       bio: 'Horror and thriller cinematographer based in Bhopal. Anamorphic, low-key lighting.',
       skills: { cinematography: 0.92, lighting: 0.88, color_grading: 0.7 },
       interests: { horror: 0.95, thriller: 0.9, drama: 0.5 },
-      experience: { overall: 0.75, horror: 0.85, thriller: 0.8 },
       availability: { status: 'available' },
       profileCompleted: true,
       reputationScore: 0.82,
+      collaborationProfile: {
+        creativity: 8,
+        communication: 7,
+        flexibility: 6,
+        reliability: 8,
+        teamwork: 7,
+        feedback_openness: 6,
+        leadership: 7,
+        technical_proficiency: 9,
+      },
+      experience: { yearsActive: 5, overall: 0.75, horror: 0.85, thriller: 0.8 },
     },
     {
       id: 'demo_priya_editor',
@@ -157,10 +179,20 @@ export async function seedDemoCreators() {
       bio: 'Editor specializing in dark narrative shorts and music videos.',
       skills: { editing: 0.9, color_grading: 0.75 },
       interests: { horror: 0.8, thriller: 0.85, drama: 0.7 },
-      experience: { overall: 0.7, horror: 0.72, thriller: 0.78 },
       availability: { status: 'available' },
       profileCompleted: true,
       reputationScore: 0.8,
+      collaborationProfile: {
+        creativity: 7,
+        communication: 9,
+        flexibility: 8,
+        reliability: 9,
+        teamwork: 8,
+        feedback_openness: 8,
+        leadership: 6,
+        technical_proficiency: 8,
+      },
+      experience: { yearsActive: 3, overall: 0.7, horror: 0.72, thriller: 0.78 },
     },
     {
       id: 'demo_arjun_sound',
@@ -174,10 +206,20 @@ export async function seedDemoCreators() {
       bio: 'Location sound and design for indie horror.',
       skills: { sound_design: 0.88, sound_recording: 0.9 },
       interests: { horror: 0.9, thriller: 0.7 },
-      experience: { overall: 0.65, horror: 0.8 },
       availability: { status: 'available' },
       profileCompleted: true,
       reputationScore: 0.78,
+      collaborationProfile: {
+        creativity: 7,
+        communication: 8,
+        flexibility: 9,
+        reliability: 7,
+        teamwork: 9,
+        feedback_openness: 7,
+        leadership: 5,
+        technical_proficiency: 9,
+      },
+      experience: { yearsActive: 4, overall: 0.65, horror: 0.8 },
     },
     {
       id: 'demo_neha_director',
@@ -185,16 +227,26 @@ export async function seedDemoCreators() {
       email: 'neha.dir@demo.affil',
       city: 'Mumbai',
       location: 'Mumbai, Maharashtra',
-      professions: ['director', 'writer'],
-      primaryRole: 'Director',
-      secondaryRoles: ['Writer'],
-      bio: 'Director of psychological horror shorts.',
-      skills: { direction: 0.9, screenwriting: 0.85 },
+      professions: ['script_writer', 'director'],
+      primaryRole: 'Script Writer',
+      secondaryRoles: ['Director'],
+      bio: 'Screenwriter for psychological horror and thrillers.',
+      skills: { direction: 0.8, screenwriting: 0.95 },
       interests: { horror: 0.95, thriller: 0.9, drama: 0.6 },
-      experience: { overall: 0.8, horror: 0.88 },
       availability: { status: 'available' },
       profileCompleted: true,
       reputationScore: 0.86,
+      collaborationProfile: {
+        creativity: 9,
+        communication: 9,
+        flexibility: 8,
+        reliability: 8,
+        teamwork: 8,
+        feedback_openness: 9,
+        leadership: 8,
+        technical_proficiency: 9,
+      },
+      experience: { yearsActive: 6, overall: 0.8, horror: 0.88 },
     },
     {
       id: 'demo_vikram_dp',
@@ -208,10 +260,20 @@ export async function seedDemoCreators() {
       bio: 'Commercial and narrative DP, Mumbai.',
       skills: { cinematography: 0.93, lighting: 0.9, camera: 0.92 },
       interests: { commercial: 0.85, drama: 0.7, horror: 0.5 },
-      experience: { overall: 0.85, commercial: 0.9, horror: 0.45 },
       availability: { status: 'available' },
       profileCompleted: true,
       reputationScore: 0.88,
+      collaborationProfile: {
+        creativity: 8,
+        communication: 8,
+        flexibility: 7,
+        reliability: 9,
+        teamwork: 8,
+        feedback_openness: 7,
+        leadership: 9,
+        technical_proficiency: 10,
+      },
+      experience: { yearsActive: 8, overall: 0.85, commercial: 0.9, horror: 0.45 },
     },
     {
       id: 'demo_sara_editor_mum',
@@ -225,10 +287,20 @@ export async function seedDemoCreators() {
       bio: 'Editor for commercials and short films.',
       skills: { editing: 0.91, color_grading: 0.8 },
       interests: { commercial: 0.8, drama: 0.75, horror: 0.4 },
-      experience: { overall: 0.78, commercial: 0.85 },
       availability: { status: 'available' },
       profileCompleted: true,
       reputationScore: 0.84,
+      collaborationProfile: {
+        creativity: 7,
+        communication: 7,
+        flexibility: 8,
+        reliability: 8,
+        teamwork: 8,
+        feedback_openness: 8,
+        leadership: 6,
+        technical_proficiency: 8,
+      },
+      experience: { yearsActive: 4, overall: 0.78, commercial: 0.85 },
     },
   ];
 

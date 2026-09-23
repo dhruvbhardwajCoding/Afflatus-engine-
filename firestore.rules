@@ -3,7 +3,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
       allow read, write: if false;
-    }1
+    }
 
     match /users/{userId} {
       allow read: if true;
@@ -52,9 +52,10 @@ service cloud.firestore {
       allow create: if request.auth != null
         && request.resource.data.senderId == request.auth.uid
         && request.resource.data.senderId != request.resource.data.recipientId;
-      allow update: if request.auth != null
-        && resource.data.recipientId == request.auth.uid
-        && request.resource.data.status in ['accepted', 'declined'];
+      allow update: if request.auth != null && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.recipientId == request.auth.uid
+      );
       allow delete: if request.auth != null && (
         resource.data.senderId == request.auth.uid ||
         resource.data.recipientId == request.auth.uid
